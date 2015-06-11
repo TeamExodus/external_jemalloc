@@ -117,6 +117,9 @@ LOCAL_SRC_FILES := \
 # This is linked into libc, which asan runtime library depends on.
 LOCAL_SANITIZE := never
 
+# This is linked into libc, which asan runtime library depends on.
+LOCAL_SANITIZE := never
+
 include $(BUILD_STATIC_LIBRARY)
 
 #-----------------------------------------------------------------------
