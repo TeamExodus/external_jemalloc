@@ -139,9 +139,16 @@ prof_tctx_comp(const prof_tctx_t *a, const prof_tctx_t *b)
 	uint64_t b_thr_uid = b->thr_uid;
 	int ret = (a_thr_uid > b_thr_uid) - (a_thr_uid < b_thr_uid);
 	if (ret == 0) {
-		uint64_t a_tctx_uid = a->tctx_uid;
-		uint64_t b_tctx_uid = b->tctx_uid;
-		ret = (a_tctx_uid > b_tctx_uid) - (a_tctx_uid < b_tctx_uid);
+		uint64_t a_thr_discrim = a->thr_discrim;
+		uint64_t b_thr_discrim = b->thr_discrim;
+		ret = (a_thr_discrim > b_thr_discrim) - (a_thr_discrim <
+		    b_thr_discrim);
+		if (ret == 0) {
+			uint64_t a_tctx_uid = a->tctx_uid;
+			uint64_t b_tctx_uid = b->tctx_uid;
+			ret = (a_tctx_uid > b_tctx_uid) - (a_tctx_uid <
+			    b_tctx_uid);
+		}
 	}
 	return (ret);
 }
@@ -202,7 +209,7 @@ prof_alloc_rollback(tsd_t *tsd, prof_tctx_t *tctx, bool updated)
 		 */
 		tdata = prof_tdata_get(tsd, true);
 		if (tdata != NULL)
-			prof_sample_threshold_update(tctx->tdata);
+			prof_sample_threshold_update(tdata);
 	}
 
 	if ((uintptr_t)tctx > (uintptr_t)1U) {
@@ -219,7 +226,7 @@ void
 prof_malloc_sample_object(const void *ptr, size_t usize, prof_tctx_t *tctx)
 {
 
-	prof_tctx_set(ptr, tctx);
+	prof_tctx_set(ptr, usize, tctx);
 
 	malloc_mutex_lock(tctx->tdata->lock);
 	tctx->cnts.curobjs++;
@@ -791,6 +798,7 @@ prof_lookup(tsd_t *tsd, prof_bt_t *bt)
 		}
 		ret.p->tdata = tdata;
 		ret.p->thr_uid = tdata->thr_uid;
+		ret.p->thr_discrim = tdata->thr_discrim;
 		memset(&ret.p->cnts, 0, sizeof(prof_cnt_t));
 		ret.p->gctx = gctx;
 		ret.p->tctx_uid = tdata->tctx_uid_next++;
@@ -1007,7 +1015,7 @@ prof_dump_write(bool propagate_err, const char *s)
 	return (false);
 }
 
-JEMALLOC_ATTR(format(printf, 2, 3))
+JEMALLOC_FORMAT_PRINTF(2, 3)
 static bool
 prof_dump_printf(bool propagate_err, const char *format, ...)
 {
@@ -1094,11 +1102,23 @@ prof_tctx_dump_iter(prof_tctx_tree_t *tctxs, prof_tctx_t *tctx, void *arg)
 {
 	bool propagate_err = *(bool *)arg;
 
-	if (prof_dump_printf(propagate_err,
-	    "  t%"PRIu64": %"PRIu64": %"PRIu64" [%"PRIu64": %"PRIu64"]\n",
-	    tctx->thr_uid, tctx->dump_cnts.curobjs, tctx->dump_cnts.curbytes,
-	    tctx->dump_cnts.accumobjs, tctx->dump_cnts.accumbytes))
-		return (tctx);
+	switch (tctx->state) {
+	case prof_tctx_state_initializing:
+	case prof_tctx_state_nominal:
+		/* Not captured by this dump. */
+		break;
+	case prof_tctx_state_dumping:
+	case prof_tctx_state_purgatory:
+		if (prof_dump_printf(propagate_err,
+		    "  t%"FMTu64": %"FMTu64": %"FMTu64" [%"FMTu64": "
+		    "%"FMTu64"]\n", tctx->thr_uid, tctx->dump_cnts.curobjs,
+		    tctx->dump_cnts.curbytes, tctx->dump_cnts.accumobjs,
+		    tctx->dump_cnts.accumbytes))
+			return (tctx);
+		break;
+	default:
+		not_reached();
+	}
 	return (NULL);
 }
 
@@ -1247,7 +1267,7 @@ prof_tdata_dump_iter(prof_tdata_tree_t *tdatas, prof_tdata_t *tdata, void *arg)
 		return (NULL);
 
 	if (prof_dump_printf(propagate_err,
-	    "  t%"PRIu64": %"PRIu64": %"PRIu64" [%"PRIu64": %"PRIu64"]%s%s\n",
+	    "  t%"FMTu64": %"FMTu64": %"FMTu64" [%"FMTu64": %"FMTu64"]%s%s\n",
 	    tdata->thr_uid, tdata->cnt_summed.curobjs,
 	    tdata->cnt_summed.curbytes, tdata->cnt_summed.accumobjs,
 	    tdata->cnt_summed.accumbytes,
@@ -1267,8 +1287,8 @@ prof_dump_header(bool propagate_err, const prof_cnt_t *cnt_all)
 	bool ret;
 
 	if (prof_dump_printf(propagate_err,
-	    "heap_v2/%"PRIu64"\n"
-	    "  t*: %"PRIu64": %"PRIu64" [%"PRIu64": %"PRIu64"]\n",
+	    "heap_v2/%"FMTu64"\n"
+	    "  t*: %"FMTu64": %"FMTu64" [%"FMTu64": %"FMTu64"]\n",
 	    ((uint64_t)1U << lg_prof_sample), cnt_all->curobjs,
 	    cnt_all->curbytes, cnt_all->accumobjs, cnt_all->accumbytes))
 		return (true);
@@ -1311,7 +1331,7 @@ prof_dump_gctx(bool propagate_err, prof_gctx_t *gctx, const prof_bt_t *bt,
 		goto label_return;
 	}
 	for (i = 0; i < bt->len; i++) {
-		if (prof_dump_printf(propagate_err, " %#"PRIxPTR,
+		if (prof_dump_printf(propagate_err, " %#"FMTxPTR,
 		    (uintptr_t)bt->vec[i])) {
 			ret = true;
 			goto label_return;
@@ -1320,7 +1340,7 @@ prof_dump_gctx(bool propagate_err, prof_gctx_t *gctx, const prof_bt_t *bt,
 
 	if (prof_dump_printf(propagate_err,
 	    "\n"
-	    "  t*: %"PRIu64": %"PRIu64" [%"PRIu64": %"PRIu64"]\n",
+	    "  t*: %"FMTu64": %"FMTu64" [%"FMTu64": %"FMTu64"]\n",
 	    gctx->cnt_summed.curobjs, gctx->cnt_summed.curbytes,
 	    gctx->cnt_summed.accumobjs, gctx->cnt_summed.accumbytes)) {
 		ret = true;
@@ -1338,7 +1358,7 @@ label_return:
 	return (ret);
 }
 
-JEMALLOC_ATTR(format(printf, 1, 2))
+JEMALLOC_FORMAT_PRINTF(1, 2)
 static int
 prof_open_maps(const char *format, ...)
 {
@@ -1412,8 +1432,8 @@ prof_leakcheck(const prof_cnt_t *cnt_all, size_t leak_ngctx,
 {
 
 	if (cnt_all->curbytes != 0) {
-		malloc_printf("<jemalloc>: Leak summary: %"PRIu64" byte%s, %"
-		    PRIu64" object%s, %zu context%s\n",
+		malloc_printf("<jemalloc>: Leak summary: %"FMTu64" byte%s, %"
+		    FMTu64" object%s, %zu context%s\n",
 		    cnt_all->curbytes, (cnt_all->curbytes != 1) ? "s" : "",
 		    cnt_all->curobjs, (cnt_all->curobjs != 1) ? "s" : "",
 		    leak_ngctx, (leak_ngctx != 1) ? "s" : "");
@@ -1533,12 +1553,12 @@ prof_dump_filename(char *filename, char v, uint64_t vseq)
 	if (vseq != VSEQ_INVALID) {
 	        /* "<prefix>.<pid>.<seq>.v<vseq>.heap" */
 		malloc_snprintf(filename, DUMP_FILENAME_BUFSIZE,
-		    "%s.%d.%"PRIu64".%c%"PRIu64".heap",
+		    "%s.%d.%"FMTu64".%c%"FMTu64".heap",
 		    opt_prof_prefix, (int)getpid(), prof_dump_seq, v, vseq);
 	} else {
 	        /* "<prefix>.<pid>.<seq>.<v>.heap" */
 		malloc_snprintf(filename, DUMP_FILENAME_BUFSIZE,
-		    "%s.%d.%"PRIu64".%c.heap",
+		    "%s.%d.%"FMTu64".%c.heap",
 		    opt_prof_prefix, (int)getpid(), prof_dump_seq, v);
 	}
 	prof_dump_seq++;
@@ -1569,7 +1589,6 @@ prof_idump(void)
 {
 	tsd_t *tsd;
 	prof_tdata_t *tdata;
-	char filename[PATH_MAX + 1];
 
 	cassert(config_prof);
 
@@ -1585,6 +1604,7 @@ prof_idump(void)
 	}
 
 	if (opt_prof_prefix[0] != '\0') {
+		char filename[PATH_MAX + 1];
 		malloc_mutex_lock(&prof_dump_seq_mtx);
 		prof_dump_filename(filename, 'i', prof_dump_iseq);
 		prof_dump_iseq++;
@@ -1623,7 +1643,6 @@ prof_gdump(void)
 {
 	tsd_t *tsd;
 	prof_tdata_t *tdata;
-	char filename[DUMP_FILENAME_BUFSIZE];
 
 	cassert(config_prof);
 
@@ -1639,6 +1658,7 @@ prof_gdump(void)
 	}
 
 	if (opt_prof_prefix[0] != '\0') {
+		char filename[DUMP_FILENAME_BUFSIZE];
 		malloc_mutex_lock(&prof_dump_seq_mtx);
 		prof_dump_filename(filename, 'u', prof_dump_useq);
 		prof_dump_useq++;
