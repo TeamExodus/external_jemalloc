@@ -21,6 +21,7 @@ jemalloc_common_cflags := \
 	-D_REENTRANT \
 	-fvisibility=hidden \
 	-Wno-unused-parameter \
+	-Wno-type-limits \
 
 # These parameters change the way jemalloc works.
 #   ANDROID_ALWAYS_PURGE
@@ -49,6 +50,12 @@ jemalloc_common_cflags += \
 	-DANDROID_TCACHE_NSLOTS_SMALL_MAX=8 \
 	-DANDROID_TCACHE_NSLOTS_LARGE=16 \
 	-DANDROID_LG_TCACHE_MAXCLASS_DEFAULT=16 \
+
+# Only enable the tcache on non-svelte configurations, to save PSS.
+ifneq ($(MALLOC_SVELTE),true)
+jemalloc_common_cflags += \
+	-DJEMALLOC_TCACHE
+endif
 
 # Use a 512K chunk size on 32 bit systems.
 # This keeps the total amount of virtual address space consumed
@@ -81,12 +88,15 @@ jemalloc_lib_src_files := \
 	src/jemalloc.c \
 	src/mb.c \
 	src/mutex.c \
+	src/nstime.c \
 	src/pages.c \
+	src/prng.c \
 	src/prof.c \
 	src/quarantine.c \
 	src/rtree.c \
 	src/stats.c \
 	src/tcache.c \
+	src/ticker.c \
 	src/tsd.c \
 	src/util.c \
 
@@ -196,6 +206,7 @@ jemalloc_unit_tests := \
 	test/unit/atomic.c \
 	test/unit/bitmap.c \
 	test/unit/ckh.c \
+	test/unit/decay.c \
 	test/unit/hash.c \
 	test/unit/junk.c \
 	test/unit/junk_alloc.c \
@@ -205,6 +216,8 @@ jemalloc_unit_tests := \
 	test/unit/math.c \
 	test/unit/mq.c \
 	test/unit/mtx.c \
+	test/unit/nstime.c \
+	test/unit/prng.c \
 	test/unit/prof_accum.c \
 	test/unit/prof_active.c \
 	test/unit/prof_gdump.c \
@@ -216,20 +229,20 @@ jemalloc_unit_tests := \
 	test/unit/quarantine.c \
 	test/unit/rb.c \
 	test/unit/rtree.c \
+	test/unit/run_quantize.c \
 	test/unit/SFMT.c \
 	test/unit/size_classes.c \
+	test/unit/smoothstep.c \
 	test/unit/stats.c \
+	test/unit/ticker.c \
 	test/unit/tsd.c \
 	test/unit/util.c \
 	test/unit/zero.c \
 
-# The latest clang update trips over test/unit/atomic.c and never finishes
-# compiling for aarch64 with -O3 (or -O2). Drop back to -O1 while we investigate
-# to stop punishing the build server.
 $(foreach test,$(jemalloc_unit_tests), \
   $(eval test_name := $(basename $(notdir $(test)))); \
   $(eval test_src := $(test)); \
-  $(eval test_cflags := -DJEMALLOC_UNIT_TEST -O1); \
+  $(eval test_cflags := -DJEMALLOC_UNIT_TEST); \
   $(eval test_libs := libjemalloc_unittest); \
   $(eval test_path := jemalloc_unittests); \
   $(eval include $(LOCAL_PATH)/Android.test.mk) \
@@ -272,6 +285,7 @@ jemalloc_integration_tests := \
 	test/integration/aligned_alloc.c \
 	test/integration/allocated.c \
 	test/integration/chunk.c \
+	test/integration/iterate.c \
 	test/integration/MALLOCX_ARENA.c \
 	test/integration/mallocx.c \
 	test/integration/overflow.c \

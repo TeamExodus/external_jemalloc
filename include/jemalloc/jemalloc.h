@@ -11,7 +11,9 @@ extern "C" {
 /* #undef	JEMALLOC_HAVE_ATTR_ALLOC_SIZE */
 
 /* Defined if format(gnu_printf, ...) attribute is supported. */
+#if !defined(__clang__)
 #define	JEMALLOC_HAVE_ATTR_FORMAT_GNU_PRINTF
+#endif
 
 /* Defined if format(printf, ...) attribute is supported. */
 #define	JEMALLOC_HAVE_ATTR_FORMAT_PRINTF
@@ -40,6 +42,14 @@ extern "C" {
  * glibc defines.
  */
 /* #undef	JEMALLOC_USE_CXX_THROW */
+
+#ifdef _MSC_VER
+#  ifdef _WIN64
+#    define LG_SIZEOF_PTR_WIN 3
+#  else
+#    define LG_SIZEOF_PTR_WIN 2
+#  endif
+#endif
 
 /* sizeof(void *) == 2^LG_SIZEOF_PTR. */
 #ifdef __LP64__
@@ -84,19 +94,20 @@ extern "C" {
 #include <limits.h>
 #include <strings.h>
 
-#define	JEMALLOC_VERSION "3.6.0-129-g3cae39166d1fc58873c5df3c0c96b45d49cb5778"
-#define	JEMALLOC_VERSION_MAJOR 3
-#define	JEMALLOC_VERSION_MINOR 6
+#define	JEMALLOC_VERSION "4.1.0-4-g33184bf69813087bf1885b0993685f9d03320c69"
+#define	JEMALLOC_VERSION_MAJOR 4
+#define	JEMALLOC_VERSION_MINOR 1
 #define	JEMALLOC_VERSION_BUGFIX 0
-#define	JEMALLOC_VERSION_NREV 129
-#define	JEMALLOC_VERSION_GID "3cae39166d1fc58873c5df3c0c96b45d49cb5778"
+#define	JEMALLOC_VERSION_NREV 4
+#define	JEMALLOC_VERSION_GID "33184bf69813087bf1885b0993685f9d03320c69"
 
-#  define MALLOCX_LG_ALIGN(la)	(la)
+#  define MALLOCX_LG_ALIGN(la)	((int)(la))
 #  if LG_SIZEOF_PTR == 2
-#    define MALLOCX_ALIGN(a)	(ffs(a)-1)
+#    define MALLOCX_ALIGN(a)	((int)(ffs(a)-1))
 #  else
 #    define MALLOCX_ALIGN(a)						\
-	 ((a < (size_t)INT_MAX) ? ffs(a)-1 : ffs(a>>32)+31)
+       ((int)(((a) < (size_t)INT_MAX) ? ffs((int)(a))-1 :		\
+       ffs((int)((a)>>32))+31))
 #  endif
 #  define MALLOCX_ZERO	((int)0x40)
 /*
@@ -116,32 +127,7 @@ extern "C" {
 #  define JEMALLOC_CXX_THROW
 #endif
 
-#ifdef JEMALLOC_HAVE_ATTR
-#  define JEMALLOC_ATTR(s) __attribute__((s))
-#  define JEMALLOC_ALIGNED(s) JEMALLOC_ATTR(aligned(s))
-#  ifdef JEMALLOC_HAVE_ATTR_ALLOC_SIZE
-#    define JEMALLOC_ALLOC_SIZE(s) JEMALLOC_ATTR(alloc_size(s))
-#    define JEMALLOC_ALLOC_SIZE2(s1, s2) JEMALLOC_ATTR(alloc_size(s1, s2))
-#  else
-#    define JEMALLOC_ALLOC_SIZE(s)
-#    define JEMALLOC_ALLOC_SIZE2(s1, s2)
-#  endif
-#  ifndef JEMALLOC_EXPORT
-#    define JEMALLOC_EXPORT JEMALLOC_ATTR(visibility("default"))
-#  endif
-#  ifdef JEMALLOC_HAVE_ATTR_FORMAT_GNU_PRINTF
-#    define JEMALLOC_FORMAT_PRINTF(s, i) JEMALLOC_ATTR(format(gnu_printf, s, i))
-#  elif defined(JEMALLOC_HAVE_ATTR_FORMAT_PRINTF)
-#    define JEMALLOC_FORMAT_PRINTF(s, i) JEMALLOC_ATTR(format(printf, s, i))
-#  else
-#    define JEMALLOC_FORMAT_PRINTF(s, i)
-#  endif
-#  define JEMALLOC_NOINLINE JEMALLOC_ATTR(noinline)
-#  define JEMALLOC_NOTHROW JEMALLOC_ATTR(nothrow)
-#  define JEMALLOC_SECTION(s) JEMALLOC_ATTR(section(s))
-#  define JEMALLOC_RESTRICT_RETURN
-#  define JEMALLOC_ALLOCATOR
-#elif _MSC_VER
+#if _MSC_VER
 #  define JEMALLOC_ATTR(s)
 #  define JEMALLOC_ALIGNED(s) __declspec(align(s))
 #  define JEMALLOC_ALLOC_SIZE(s)
@@ -167,6 +153,31 @@ extern "C" {
 #  else
 #    define JEMALLOC_ALLOCATOR
 #  endif
+#elif defined(JEMALLOC_HAVE_ATTR)
+#  define JEMALLOC_ATTR(s) __attribute__((s))
+#  define JEMALLOC_ALIGNED(s) JEMALLOC_ATTR(aligned(s))
+#  ifdef JEMALLOC_HAVE_ATTR_ALLOC_SIZE
+#    define JEMALLOC_ALLOC_SIZE(s) JEMALLOC_ATTR(alloc_size(s))
+#    define JEMALLOC_ALLOC_SIZE2(s1, s2) JEMALLOC_ATTR(alloc_size(s1, s2))
+#  else
+#    define JEMALLOC_ALLOC_SIZE(s)
+#    define JEMALLOC_ALLOC_SIZE2(s1, s2)
+#  endif
+#  ifndef JEMALLOC_EXPORT
+#    define JEMALLOC_EXPORT JEMALLOC_ATTR(visibility("default"))
+#  endif
+#  ifdef JEMALLOC_HAVE_ATTR_FORMAT_GNU_PRINTF
+#    define JEMALLOC_FORMAT_PRINTF(s, i) JEMALLOC_ATTR(format(gnu_printf, s, i))
+#  elif defined(JEMALLOC_HAVE_ATTR_FORMAT_PRINTF)
+#    define JEMALLOC_FORMAT_PRINTF(s, i) JEMALLOC_ATTR(format(printf, s, i))
+#  else
+#    define JEMALLOC_FORMAT_PRINTF(s, i)
+#  endif
+#  define JEMALLOC_NOINLINE JEMALLOC_ATTR(noinline)
+#  define JEMALLOC_NOTHROW JEMALLOC_ATTR(nothrow)
+#  define JEMALLOC_SECTION(s) JEMALLOC_ATTR(section(s))
+#  define JEMALLOC_RESTRICT_RETURN
+#  define JEMALLOC_ALLOCATOR
 #else
 #  define JEMALLOC_ATTR(s)
 #  define JEMALLOC_ALIGNED(s)

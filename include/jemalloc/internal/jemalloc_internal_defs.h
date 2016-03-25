@@ -139,7 +139,8 @@
  * This makes it possible to allocate/deallocate objects without any locking
  * when the cache is in the steady state.
  */
-#define JEMALLOC_TCACHE 
+/* ANDROID: The tcache is enabled/disabled in the Makefile, not here. */
+/* #undef JEMALLOC_TCACHE */
 
 /*
  * JEMALLOC_DSS enables use of sbrk(2) to allocate chunks from the data storage
@@ -194,9 +195,10 @@
 /* #undef JEMALLOC_TLS */
 
 /*
- * ffs()/ffsl() functions to use for bitmapping.  Don't use these directly;
- * instead, use jemalloc_ffs() or jemalloc_ffsl() from util.h.
+ * ffs*() functions to use for bitmapping.  Don't use these directly; instead,
+ * use ffs_*() from util.h.
  */
+#define JEMALLOC_INTERNAL_FFSLL __builtin_ffsll
 #define JEMALLOC_INTERNAL_FFSL __builtin_ffsl
 #define JEMALLOC_INTERNAL_FFS __builtin_ffs
 
@@ -250,6 +252,9 @@
 #define LG_SIZEOF_LONG 2
 #endif
 
+/* sizeof(long long) == 2^LG_SIZEOF_LONG_LONG. */
+#define LG_SIZEOF_LONG_LONG 3
+
 /* sizeof(intmax_t) == 2^LG_SIZEOF_INTMAX_T. */
 #define LG_SIZEOF_INTMAX_T 3
 
@@ -267,5 +272,8 @@
  * JEMALLOC_PREFIX is not defined).
  */
 #define JEMALLOC_EXPORT 
+
+/* config.malloc_conf options string. */
+#define JEMALLOC_CONFIG_MALLOC_CONF ""
 
 #endif /* JEMALLOC_INTERNAL_DEFS_H_ */
